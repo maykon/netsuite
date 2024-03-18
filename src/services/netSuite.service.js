@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import path from 'path';
 import { BaseError, prompt } from '@maykoncapellari/cli-builder';
 import { randomUUID } from 'crypto';
 
@@ -11,16 +12,20 @@ import { randomUUID } from 'crypto';
  * @example
  * const nsService = new NetSuiteService({ ...params });
  * await nsService.signIn();
- * // Will read '~/attachmentsDir/myfile.pdf' and put on 'me/drive/root/My Sharepoint Docs/myfile.pdf' on sharepoint
- * await nsService.uploadFile('~/attachmentsDir', 'My Sharepoint Docs', 'myfile.pdf');
- * const profile = await nsService.requestGet('me'); // Get my profile data
+ * const invoices = await nsService.requestGet('/record/v1/invoice');
+ * console.log(invoices);
+ * const files = await nsService.executeSuiteQl(`SELECT * FROM  MediaItemFolder WHERE id = '1253'`);
+ * console.info(files);
+ * const downloadFile = await nsService.downloadFile(524171, './');
  * await nsService.logout();
  */
 export default class NetSuiteService {
   static #nsRedirectUri = 'https://login.live.com/oauth20_desktop.srf';
   static #nsAuthUrl = 'https://%s.app.netsuite.com/app/login/oauth2/authorize.nl';
   static #nsApiUrl = 'https://%s.suitetalk.api.netsuite.com/services/rest';
-  static #nsScopes = 'rest_webservices';
+  static #nsRestletUrl = 'https://%s.restlets.api.netsuite.com/app/site/hosting/restlet.nl';
+  static #nsBase64Regex = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})$/;
+  static #nsScopes = 'restlets,rest_webservices';
   static #MAX_RETRIES = 3;
 
   #nsAccountId;
@@ -32,6 +37,8 @@ export default class NetSuiteService {
   #nsRefreshToken;
   #isDebug;
   #shouldLogToken;
+  #nsScript;
+  #nsDeploy;
 
   /**
    * The Params NetSuiteService.
@@ -40,6 +47,8 @@ export default class NetSuiteService {
    * @property {string} accountId - The NetSuite Account ID.
    * @property {string} client - The NetSuite APP ClientID.
    * @property {string} secret - The NetSuite APP ClientSecret.
+   * @property {string} [script] - The NetSuite Script ID.
+   * @property {string} [deploy] - The NetSuite Script deploy version.
    * @property {string} [token] - The NetSuite Access Token (When defined the client and secret is ignored)
    * @property {boolean} [debug] - Define debug mode (Default: false)
    * @property {boolean} [logToken] - Define if will log the access token after sigIn (Default: false)
@@ -50,7 +59,7 @@ export default class NetSuiteService {
    * @constructor
    * @param {NetSuiteServiceParams} params
    */
-  constructor({ accountId, client, secret, token, debug, logToken }) {
+  constructor({ accountId, client, secret, token, script, deploy, debug, logToken }) {
     if (!accountId) {
       throw new BaseError('⚠️ The NetSuite Account ID is required!');
     }
@@ -64,18 +73,33 @@ export default class NetSuiteService {
     this.#nsAccountId = accountId;
     this.#nsClientId = client;
     this.#nsClientSecret = secret;
+    this.#nsScript = script;
+    this.#nsDeploy = deploy || 1;
     this.logout();
     this.#nsAccessToken = token;
     this.#isDebug = debug || process.env.MS_GRAPH_DEBUG === 'true';
     this.#shouldLogToken = logToken === 'true';
   }
 
+  /**
+   * Step One GET Request to the Authorization Endpoint
+   * 
+   * Generate the URL to authorize the request with the Consent Screen
+   * 
+   * @returns {string} The URL to authorize the request
+   */
   #generateAuthorizeRequest() {
     this.#nsState = randomUUID();
     const nsServer = NetSuiteService.#nsAuthUrl.replace(/%s/, this.#nsAccountId);
     return `${nsServer}?client_id=${this.#nsClientId}&response_type=code&redirect_uri=${NetSuiteService.#nsRedirectUri}&scope=${NetSuiteService.#nsScopes}&state=${this.#nsState}`;
   }
 
+  /**
+   * Log messages in Debug mode
+   * 
+   * @param {string} path 
+   * @param {*} message 
+   */
   #debug(path, message) {
     if (this.#isDebug) {
       console.debug(`\n⚠️  ${path}`);
@@ -84,19 +108,58 @@ export default class NetSuiteService {
     }
   }
 
+  /**
+   * Log requests in Debug mode
+   * 
+   * @param {*} path 
+   * @param {*} response 
+   */
   #debugResponse(path, response) {
     const { url, status, statusText, body } = response;
     return this.#debug(path, { url, status, statusText, body });
   }
 
+  /**
+   * Return the token URL including the account ID
+   * 
+   * @returns {string}
+   */
   #getTokenUrl() {
     return this.#getApiUrl().concat('/auth/oauth2/v1/token');
   }
 
+  /**
+   * Get header value used in the auth client in base64 (clientId:clientSecret)
+   * 
+   * @example
+   * console.log(this.#getClientAuth());
+   * //Y2xpZW50SWQ6Y2xpZW50U2VjcmV0
+   * 
+   * @returns {string}
+   */
   #getClientAuth() {
     return Buffer.from(`${this.#nsClientId}:${this.#nsClientSecret}`).toString('base64');
   }
 
+  /**
+   * The Params AuthResponse.
+   * 
+   * @typedef {Object} AuthResponse
+   * @property {string} access_token - The NetSuite Access Token.
+   * @property {string} refresh_token - The NetSuite Refresh Token.
+   * @property {string} expires_in - When the token will be expired in x seconds.
+   * @property {string} token_type - The type of the token (Bearer).
+   */
+
+  /**
+   * Step Two/Refresh Token POST Request to the Token Endpoint
+   * 
+   * Request to get the access token or to refresh some token
+   * 
+   * @param {string} token 
+   * @param {authorization_code|refresh_token} grant_type 
+   * @returns {AuthResponse} The response contain acces_token and refresh_token
+   */
   async #requestAuthorizationToken(token, grant_type = 'authorization_code') {
     const tokenKey = grant_type === 'refresh_token' ? grant_type : 'code';
     try {
@@ -131,6 +194,11 @@ export default class NetSuiteService {
     }    
   }
 
+  /**
+   * Set the tokens internally
+   * 
+   * @param {AuthResponse} authorization 
+   */
   #setAuthorizationTokens(authorization) {
     this.#nsAccessToken = authorization.access_token;
     this.#nsRefreshToken = authorization.refresh_token;
@@ -139,15 +207,31 @@ export default class NetSuiteService {
     }
   }
 
-  async #getMyInfo() {
-    return this.requestGet('/');
+  /**
+   * Get the account records used only to validate the token
+   * 
+   * @returns {*}
+   */
+  async #getAccountInfo() {
+    return this.requestGet('/record/v1/account');
   }
 
+  /**
+   * Return an object used on logs
+   * 
+   * @param {*} response 
+   * @returns {*}
+   */
   #getResponseLog(response) {
     const { url, status, statusText } = response;
     return { url, status, statusText };
   }
 
+  /**
+   * Refresh the token when is needed
+   * 
+   * @returns {AuthResponse}
+   */
   async #refreshToken() {
     try {
       this.#debug('RefreshToken', this.#nsRefreshToken);
@@ -158,17 +242,44 @@ export default class NetSuiteService {
     }
   }
 
+  /**
+   * Get the header auth object with the  bearer token
+   * 
+   * @returns {*}
+   */
+  #getAuthHeader() {
+    return { 'Authorization': `Bearer ${this.#nsAccessToken}` };
+  }
+
+  /**
+   * Make the internal request to Netsuite
+   * 
+   * @param {string} url - The url to send to NetSuite
+   * @param {GET|POST|PUT|DELETE} method - The HTTP Method used on the request
+   * @param {*} body - The body of the request
+   * @param {*} headers - Some custom headers
+   * @returns {*}
+   */
   async #internalRequest(url, method, body, headers) {
     return fetch(url, {
       method,
       headers: {
-        'Authorization': `Bearer ${this.#nsAccessToken}`,
+        ...this.#getAuthHeader(),
         ...headers,
       },
       body,
     });
   }
 
+  /**
+   * Renew the token when this one is expired
+   * 
+   * @param {string} url - The url to send to NetSuite
+   * @param {GET|POST|PUT|DELETE} method - The HTTP Method used on the request
+   * @param {*} body - The body of the request
+   * @param {*} headers - Some custom headers
+   * @returns {*}
+   */
   async #renewTokenWithNeeded(url, method, body, headers) {
     try {
       let response = await this.#internalRequest(url, method, body, headers);
@@ -187,10 +298,24 @@ export default class NetSuiteService {
     }
   }
 
+  /**
+   * Return the api URL used in requests to Netsuite
+   * 
+   * @returns {string}
+   */
   #getApiUrl() {
     return NetSuiteService.#nsApiUrl.replace(/%s/, this.#nsAccountId);
   }
 
+  /**
+   * Make the requests to NetSuite
+   * 
+   * @param {string} url - The url to send to NetSuite
+   * @param {GET|POST|PUT|DELETE} method - The HTTP Method used on the request
+   * @param {*} body - The body of the request
+   * @param {*} headers - Some custom headers
+   * @returns {*}
+   */
   async #requestApi(url, method, body, headers = {}) {
     let retry = 1;
     let response = null;
@@ -221,7 +346,7 @@ export default class NetSuiteService {
    * 
    * @param {string} url 
    * @param {*} headers 
-   * @returns 
+   * @returns {*}
    */
   async requestGet(url, headers) {
     return this.#requestApi(url, 'GET', headers);
@@ -233,7 +358,7 @@ export default class NetSuiteService {
    * @param {string} url 
    * @param {*} body 
    * @param {*} headers 
-   * @returns 
+   * @returns {*}
    */
   async requestPost(url, body, headers) {
     return this.#requestApi(url, 'POST', body, headers);
@@ -246,7 +371,7 @@ export default class NetSuiteService {
    * @param {*} body 
    * @param {*} headers 
    * @param {*} debug 
-   * @returns 
+   * @returns {*}
    */
   async requestPut(url, body, headers, debug) {
     return this.#requestApi(url, 'PUT', body, headers, debug);
@@ -258,64 +383,82 @@ export default class NetSuiteService {
    * @param {*} url 
    * @param {*} body 
    * @param {*} headers 
-   * @returns 
+   * @returns {*}
    */
   async requestDelete(url, body, headers) {
     return this.#requestApi(url, 'DELETE', body, headers);
   }
 
-  async #fileExists(filename) {
-    return fs.access(filename, fs.constants.F_OK)
-      .then(() => true)
-      .catch(() => false);
+  /**
+   * Get the restlet URL used on download file
+   * @returns {string}
+   */
+  #getRestletUrl() {
+    return `${NetSuiteService.#nsRestletUrl.replace(/%s/, this.#nsAccountId)}?script=${this.#nsScript}&deploy=${this.#nsDeploy}`;
   }
 
   /**
-   * Upload some file to a specific folder on Sharepoint
+   * Check if file is encoded in base64
    * 
-   * @param {string} attachmentDir - The path to a directory that contains the file to be uploaded
-   * @param {string} folderName - the URL Path that will be save the file on Sharepoint (If the folder/path not exists will be created)
-   * @param {string} file - The filename from the file that is inside of `attachmentDir` and will be saved on Sharepoint
-   * @returns 
+   * @param {string} file 
+   * @returns {boolean}
+   */
+  #isFileInBase64(file) {
+    return NetSuiteService.#nsBase64Regex.test(file);
+  }
+
+  /**
+   * Download a file with ID from File Cabinet
+   * 
+   * @param {string|number} fileId - The id of the file on File Cabinet
+   * @param {string} folderPath - The folder path to save the file
+   * @returns {string} The file path from the downloaded file
    * 
    * @example
-   * // Will read '~/attachmentsDir/myfile.pdf' and put on 'me/drive/root/My Sharepoint Docs/myfile.pdf' on sharepoint
-   * await msService.uploadFile('~/attachmentsDir', 'My Sharepoint Docs', 'myfile.pdf');
+   * const downloadedFile = await msService.downloadFile('1234', '~/.');
    */
-  async uploadFile(attachmentDir, folderName, file) {
-    const fileName = file.split('/').at(-1);
-    // const urlFile = this.#sharepointFolder.concat(`:/${folderName}/${NormalizeUtils.encode(fileName)}:/content`);
+  async downloadFile(fileId, folderPath) {
+    if (!this.#nsScript) {
+      throw new BaseError('Script is required!');
+    }
     try {
-      const filePath = attachmentDir.concat(`/${file}`);
-      const fileExist = await this.#fileExists(filePath);
-      this.#debug('uploadFile', `File exists? ${fileExist}`);
-      if (!fileExist) {
-        this.#debug('uploadFile', `File ${filePath} not exists.`);
-        return null;
-      }
-      const fileContent = await fs.readFile(attachmentDir.concat(`/${file}`));
-      const response = await this.requestPut(urlFile, fileContent);
-      if (response?.error) {
-        this.#debug('UploadFile', response.error);
-        throw new BaseError(response.error?.message || 'Error in upload file');
-      }
-      return response;
+      const downloadUrl = this.#getRestletUrl();
+      const body = JSON.stringify({ fileId });
+      const fileObj = await fetch(downloadUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.#getAuthHeader(),
+        },
+        body,
+      }).then(async (response) => {
+        if (!response.ok) {
+          const error = await response.text();
+          throw new BaseError(`Cannot download the file: ${downloadUrl} - ${response.statusText} - ${error}`);
+        }
+        return response.json(); 
+      });
+
+      const contentFile = this.#isFileInBase64(fileObj.content) 
+        ? Buffer.from(fileObj.content, 'base64') 
+        : fileObj.content;
+      const downloadPath = path.resolve(folderPath, fileObj.info.name);
+      await fs.writeFile(downloadPath, contentFile);
+      return downloadPath;
     } catch (error) {
-      this.#debug('UploadFile', { urlFile, error });
-      throw new BaseError(`Cannot upload a new file in ${urlFile}`);
-    }    
+      this.#debug('downloadFile', { fileId, error });
+      throw new BaseError(`Cannot download the file ${fileId}`);
+    }
   }
 
   /**
    * Sign In on NetSuite get the access token and refresh token
-   * 
-   * @returns 
    */
   async signIn() {
     console.info('💡 NetSuite Authentication step\n');
     if (this.#nsAccessToken) {
       console.info('🔑 NetSuite access token already informed.\n');
-      await this.#getMyInfo();
+      await this.#getAccountInfo();
       return;
     }
     const authorizeUrl = this.#generateAuthorizeRequest();
