@@ -1,6 +1,6 @@
 {
   "name": "@maykoncapellari/netsuite",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "NetSuite module to helps to manage the requests and download files from File Cabinet",
   "main": "src/index.js",
   "type": "module",
@@ -23,6 +23,6 @@
   },
   "homepage": "https://github.com/maykon/netsuite#readme",
   "dependencies": {
-    "@maykoncapellari/cli-builder": "^1.0.8"
+    "@maykoncapellari/cli-builder": "^1.0.11"
   }
 }

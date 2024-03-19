@@ -435,7 +435,8 @@ export default class NetSuiteService {
       }).then(async (response) => {
         if (!response.ok) {
           const error = await response.text();
-          throw new BaseError(`Cannot download the file: ${downloadUrl} - ${response.statusText} - ${error}`);
+          this.#debug('DownloadFile', { fileId, error });
+          throw new BaseError(`Cannot download the file: ${downloadUrl}`, error);
         }
         return response.json(); 
       });
@@ -447,8 +448,8 @@ export default class NetSuiteService {
       await fs.writeFile(downloadPath, contentFile);
       return downloadPath;
     } catch (error) {
-      this.#debug('downloadFile', { fileId, error });
-      throw new BaseError(`Cannot download the file ${fileId}`);
+      this.#debug('DownloadFile', { fileId, error });
+      throw new BaseError(`Cannot download the file ${fileId}`, error);
     }
   }
 
