@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { BaseError, prompt } from '@maykoncapellari/cli-builder';
 import { randomUUID } from 'crypto';
+import NormalizeUtils from '../utils/normalize.utils.js';
 
 /**
  * NetSuite Service
@@ -442,7 +443,7 @@ export default class NetSuiteService {
       const contentFile = this.#isFileInBase64(fileObj.content) 
         ? Buffer.from(fileObj.content, 'base64') 
         : fileObj.content;
-      const downloadPath = path.resolve(folderPath, fileObj.info.name);
+      const downloadPath = path.resolve(folderPath, NormalizeUtils.normalize(fileObj.info.name));
       await fs.writeFile(downloadPath, contentFile);
       return downloadPath;
     } catch (error) {
