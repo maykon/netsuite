@@ -434,7 +434,7 @@ export default class NetSuiteService {
         body,
       }).then(async (response) => {
         if (!response.ok) {
-          const error = await response.text();
+          const error = await response.json();
           this.#debug('DownloadFile', { fileId, error });
           throw new BaseError(`Cannot download the file: ${downloadUrl}`, error);
         }
