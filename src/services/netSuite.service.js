@@ -185,13 +185,13 @@ export default class NetSuiteService {
         });
       this.#debug('RequestAuthorizationToken', authorization);
       if (authorization.error) {
-        throw new BaseError(authorization.error?.message || 'Error in get authorization token');
+        throw new BaseError(authorization.error?.message || 'Error in get authorization token', authorization.error);
       }
       this.#setAuthorizationTokens(authorization);
       return authorization;
     } catch (error) {
       this.#debug('RequestAuthorizationToken', error);
-      throw new BaseError(`Cannot get the NetSuite authorization ${tokenKey}`);
+      throw new BaseError(`Cannot get the NetSuite authorization ${tokenKey}`, error?.error);
     }    
   }
 
@@ -329,7 +329,7 @@ export default class NetSuiteService {
           if (/IO error during request payload read/.test(response.error.message)) {
             return null;
           }
-          throw new BaseError(`Error in request [${method}]: ${url}`);
+          throw new BaseError(`Error in request [${method}]: ${url}`, response.error);
         }
         break;
       } catch(error) {
@@ -449,7 +449,7 @@ export default class NetSuiteService {
       return downloadPath;
     } catch (error) {
       this.#debug('DownloadFile', { fileId, error });
-      throw new BaseError(`Cannot download the file ${fileId}`, error);
+      throw new BaseError(`Cannot download the file ${fileId}`, error?.error);
     }
   }
 
