@@ -1,6 +1,6 @@
 {
   "name": "@maykoncapellari/netsuite",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "NetSuite module to helps to manage the requests and download files from File Cabinet",
   "main": "src/index.js",
   "type": "module",
@@ -14,6 +14,8 @@
     "nodejs",
     "netsuite",
     "file cabinet",
+    "restlet",
+    "suiteql",
     "download"
   ],
   "author": "maykoncapellari <maykonluiscapellari@gmail.com>",

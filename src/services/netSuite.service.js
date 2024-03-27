@@ -394,8 +394,8 @@ export default class NetSuiteService {
    * Get the restlet URL used on download file
    * @returns {string}
    */
-  #getRestletUrl() {
-    return `${NetSuiteService.#nsRestletUrl.replace(/%s/, this.#nsAccountId)}?script=${this.#nsScript}&deploy=${this.#nsDeploy}`;
+  #getRestletUrl(script, deploy) {
+    return `${NetSuiteService.#nsRestletUrl.replace(/%s/, this.#nsAccountId)}?script=${script}&deploy=${deploy}`;
   }
 
   /**
@@ -406,6 +406,44 @@ export default class NetSuiteService {
    */
   #isFileInBase64(file) {
     return NetSuiteService.#nsBase64Regex.test(file);
+  }
+
+  /**
+   * Execute a restlet script
+   * 
+   * @param {number} script - Script version 
+   * @param {number} deploy - Deploy version from the script
+   * @param {(GET|POST|PUT|DELETE)} method - HTTP method supported on the script
+   * @param {number} restletBody - Body to be sent to the script
+   * @returns {*} Return the response of script
+   * 
+   * @example
+   * const result = await msService.executeRestlet(1050, 1, { fileID: 123456 });
+   */
+  async executeRestlet(script, deploy, method = 'POST', restletBody = {}) {
+    if (!script) {
+      throw new BaseError('Script number is required!');
+    }
+    if (!deploy) {
+      throw new BaseError('Deploy version is required!');
+    }
+    const restletUrl = this.#getRestletUrl(script, deploy);
+    const body = JSON.stringify(restletBody);
+    return fetch(restletUrl, {
+      method: method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.#getAuthHeader(),
+      },
+      body,
+    }).then(async (response) => {
+      if (!response.ok) {
+        const error = await response.json();
+        this.#debug('ExecuteRestlet', { script, deploy, restletBody, error });
+        throw new BaseError(`Cannot execute restlet script ${restletUrl}`, error);
+      }
+      return response.json(); 
+    });
   }
 
   /**
@@ -423,24 +461,7 @@ export default class NetSuiteService {
       throw new BaseError('Script is required!');
     }
     try {
-      const downloadUrl = this.#getRestletUrl();
-      const body = JSON.stringify({ fileId });
-      const fileObj = await fetch(downloadUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...this.#getAuthHeader(),
-        },
-        body,
-      }).then(async (response) => {
-        if (!response.ok) {
-          const error = await response.json();
-          this.#debug('DownloadFile', { fileId, error });
-          throw new BaseError(`Cannot download the file: ${downloadUrl}`, error);
-        }
-        return response.json(); 
-      });
-
+      const fileObj = await this.executeRestlet(this.#nsScript, this.#nsDeploy, 'POST', { fileId });
       const contentFile = this.#isFileInBase64(fileObj.content) 
         ? Buffer.from(fileObj.content, 'base64') 
         : fileObj.content;
