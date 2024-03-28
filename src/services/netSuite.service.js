@@ -462,6 +462,9 @@ export default class NetSuiteService {
     }
     try {
       const fileObj = await this.executeRestlet(this.#nsScript, this.#nsDeploy, 'POST', { fileId });
+      if (!fileObj.content?.length) {
+        return { ...fileObj.info };
+      }
       const contentFile = this.#isFileInBase64(fileObj.content) 
         ? Buffer.from(fileObj.content, 'base64') 
         : fileObj.content;
