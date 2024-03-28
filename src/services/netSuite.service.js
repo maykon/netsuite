@@ -17,7 +17,7 @@ import NormalizeUtils from '../utils/normalize.utils.js';
  * console.log(invoices);
  * const files = await nsService.executeSuiteQl(`SELECT * FROM  MediaItemFolder WHERE id = '1253'`);
  * console.info(files);
- * const downloadFile = await nsService.downloadFile(524171, './');
+ * const downloadFileInfo = await nsService.downloadFile(524171, './');
  * await nsService.logout();
  */
 export default class NetSuiteService {
@@ -451,10 +451,10 @@ export default class NetSuiteService {
    * 
    * @param {string|number} fileId - The id of the file on File Cabinet
    * @param {string} folderPath - The folder path to save the file
-   * @returns {string} The file path from the downloaded file
+   * @returns {*} The file info from the downloaded file
    * 
    * @example
-   * const downloadedFile = await msService.downloadFile('1234', '~/.');
+   * const downloadedFileInfo = await msService.downloadFile('1234', '~/.');
    */
   async downloadFile(fileId, folderPath) {
     if (!this.#nsScript) {
@@ -467,7 +467,7 @@ export default class NetSuiteService {
         : fileObj.content;
       const downloadPath = path.resolve(folderPath, NormalizeUtils.normalize(fileObj.info.name));
       await fs.writeFile(downloadPath, contentFile);
-      return downloadPath;
+      return { ...fileObj.info, downloadPath };
     } catch (error) {
       this.#debug('DownloadFile', { fileId, error });
       throw new BaseError(`Cannot download the file ${fileId}`, error?.error);

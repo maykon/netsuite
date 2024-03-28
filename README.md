@@ -19,5 +19,5 @@ Import in NodeJS script:
     console.log(invoices);
     const files = await nsService.executeSuiteQl(`SELECT * FROM MediaItemFolder WHERE id = '1253'`);
     console.info(files);
-    const downloadFile = await nsService.downloadFile(524171, './');
+    const downloadFileInfo = await nsService.downloadFile(524171, './');
     await nsService.logout();
