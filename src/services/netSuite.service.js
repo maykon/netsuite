@@ -22,6 +22,7 @@ import NormalizeUtils from '../utils/normalize.utils.js';
  */
 export default class NetSuiteService {
   static #nsRedirectUri = 'https://login.live.com/oauth20_desktop.srf';
+  static #nsAppUrl = 'https://%s.app.netsuite.com';
   static #nsAuthUrl = 'https://%s.app.netsuite.com/app/login/oauth2/authorize.nl';
   static #nsApiUrl = 'https://%s.suitetalk.api.netsuite.com/services/rest';
   static #nsRestletUrl = 'https://%s.restlets.api.netsuite.com/app/site/hosting/restlet.nl';
@@ -261,7 +262,7 @@ export default class NetSuiteService {
    * @param {*} headers - Some custom headers
    * @returns {*}
    */
-  async #internalRequest(url, method, body, headers) {
+  async #internalRequest(url, method = 'GET', body, headers) {
     return fetch(url, {
       method,
       headers: {
@@ -309,6 +310,16 @@ export default class NetSuiteService {
   }
 
   /**
+   * Get full api url
+   * 
+   * @param {*} url 
+   * @returns {string}
+   */
+  #getFullUrl(baseUrl, url) {
+    return /^http/.test(url) ? url : `${baseUrl}${url}`;
+  }
+
+  /**
    * Make the requests to NetSuite
    * 
    * @param {string} url - The url to send to NetSuite
@@ -320,24 +331,24 @@ export default class NetSuiteService {
   async #requestApi(url, method, body, headers = {}) {
     let retry = 1;
     let response = null;
+    const endpoint = this.#getFullUrl(this.#getApiUrl(), url);
     while(retry <= NetSuiteService.#MAX_RETRIES) {
       try {
-        response = await this.#renewTokenWithNeeded(`${this.#getApiUrl()}${url}`, method, body, headers);
+        response = await this.#renewTokenWithNeeded(endpoint, method, body, headers);
         this.#debug('RequestApi', response);
         if (response.error) {
-          console.error('#requestApi: ', url, response);
           if (/IO error during request payload read/.test(response.error.message)) {
             return null;
           }
-          throw new BaseError(`Error in request [${method}]: ${url}`, response.error);
+          throw new BaseError(`Error in request [${method}]: ${endpoint}`, response.error);
         }
         break;
       } catch(error) {
-        this.#debug('RequestApi', { url, error: `Retrying ${retry++} time(s)`, throwed: error });
+        this.#debug('RequestApi', { url: endpoint, error: `Retrying ${retry++} time(s)`, throwed: error });
       }
     }
     if (retry > NetSuiteService.#MAX_RETRIES) {
-      throw new BaseError(`Max retries error in request [${method}]: ${url}`);
+      throw new BaseError(`Max retries error in request [${method}]: ${endpoint}`);
     }
     return response;
   }
@@ -465,7 +476,7 @@ export default class NetSuiteService {
       if (!fileObj.content?.length) {
         return { ...fileObj.info };
       }
-      const contentFile = this.#isFileInBase64(fileObj.content) 
+      const contentFile = this.#isFileInBase64(fileObj.content.slice(0,100)) 
         ? Buffer.from(fileObj.content, 'base64') 
         : fileObj.content;
       const downloadPath = path.resolve(folderPath, NormalizeUtils.normalize(fileObj.info.name));
@@ -520,5 +531,26 @@ When ready, please enter the value of the code parameter (from the URL of the bl
     return this.requestPost('/query/v1/suiteql', body, {
       'Prefer': 'transient',
     });
+  }
+
+  /**
+   * Return the api URL used in requests to Netsuite
+   * 
+   * @returns {string}
+   */
+  #getAppUrl() {
+    return NetSuiteService.#nsAppUrl.replace(/%s/, this.#nsAccountId);
+  }
+
+  async downloadFileByUrl(url, folderPath) {
+    const endpoint = this.#getFullUrl(this.#getAppUrl(), url);
+    try {
+      const response = await this.#internalRequest(endpoint);
+      const body = Readable.fromWeb(response.body);
+      await fs.writeFile(folderPath, body);
+    } catch (error) {
+      this.#debug('downloadFileByUrl', { url, error });
+      throw new BaseError(`Cannot download the file ${endpoint}`, error?.error);
+    }
   }
 }

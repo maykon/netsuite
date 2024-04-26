@@ -1,6 +1,6 @@
 {
   "name": "@maykoncapellari/netsuite",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "NetSuite module to helps to manage the requests and download files from File Cabinet",
   "main": "src/index.js",
   "type": "module",
