@@ -9,7 +9,9 @@
     "type": "git",
     "url": "git+https://github.com/maykon/netsuite.git"
   },
-  "scripts": {},
+  "scripts": {
+    "publish": "npm publish --access public"
+  },
   "keywords": [
     "nodejs",
     "netsuite",
